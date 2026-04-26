@@ -1,5 +1,6 @@
 export type EnemyKind = "guard" | "monster";
 export type PlayerId = "p1" | "p2";
+export type PlayerCount = 1 | 2;
 export type FloorKind = "solid" | "lava";
 
 export interface Platform {

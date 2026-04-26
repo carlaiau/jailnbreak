@@ -5,6 +5,7 @@ import type {
   EnemyKind,
   GeneratedLevel,
   Platform,
+  PlayerCount,
   Room,
   PlayerId,
   PlayerStatus,
@@ -16,9 +17,15 @@ type ControlSet = {
   right: Phaser.Input.Keyboard.Key;
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
-  punch: Phaser.Input.Keyboard.Key;
-  kick: Phaser.Input.Keyboard.Key;
+  attack: Phaser.Input.Keyboard.Key;
   hide: Phaser.Input.Keyboard.Key;
+};
+
+type AttackMove = {
+  animation: "punch" | "kick";
+  range: number;
+  damage: number;
+  knockback: number;
 };
 
 type PlayerActor = {
@@ -53,8 +60,6 @@ type EnemyActor = {
   attackCooldownUntil: number;
 };
 
-type PlayerCount = 1 | 2;
-
 type LadderZone = {
   x: number;
   topY: number;
@@ -68,6 +73,10 @@ const JUMP_SPEED = -580;
 const CLIMB_SPEED = 145;
 const DAMAGE_COOLDOWN = 900;
 const ATTACK_COOLDOWN = 330;
+const ATTACK_MOVES: AttackMove[] = [
+  { animation: "punch", range: 38, damage: 1, knockback: 150 },
+  { animation: "kick", range: 52, damage: 2, knockback: 270 }
+];
 
 export class GameScene extends Phaser.Scene {
   private level!: GeneratedLevel;
@@ -483,8 +492,7 @@ export class GameScene extends Phaser.Scene {
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
       down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      punch: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
-      kick: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T),
+      attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
       hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
     });
 
@@ -496,8 +504,7 @@ export class GameScene extends Phaser.Scene {
         right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
         up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
         down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-        punch: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
-        kick: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH),
+        attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
         hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
       });
 
@@ -716,12 +723,8 @@ export class GameScene extends Phaser.Scene {
       this.toggleHide(player);
     }
 
-    if (Phaser.Input.Keyboard.JustDown(player.controls.punch)) {
-      this.attack(player, 38, 1, 150, time);
-    }
-
-    if (Phaser.Input.Keyboard.JustDown(player.controls.kick)) {
-      this.attack(player, 52, 2, 270, time);
+    if (Phaser.Input.Keyboard.JustDown(player.controls.attack)) {
+      this.attack(player, time);
     }
 
     player.sprite.setFlipX(player.facing === -1);
@@ -846,30 +849,25 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private attack(
-    player: PlayerActor,
-    range: number,
-    damage: number,
-    knockback: number,
-    time: number
-  ): void {
+  private attack(player: PlayerActor, time: number): void {
     if (player.status.hidden || time < player.attackCooldownUntil) {
       return;
     }
 
+    const move = ATTACK_MOVES[Phaser.Math.Between(0, ATTACK_MOVES.length - 1)];
     player.attackCooldownUntil = time + ATTACK_COOLDOWN;
     player.animationLockUntil = time + 260;
     player.status.recentlyAttackedUntil = time + 700;
-    player.sprite.play(`${player.sprite.texture.key}-${damage > 1 ? "kick" : "punch"}`, true);
+    player.sprite.play(`${player.sprite.texture.key}-${move.animation}`, true);
     this.spawnSpark(player.sprite.x + player.facing * 30, player.sprite.y - 4);
 
     for (const enemy of [...this.enemyActors]) {
       const dx = enemy.sprite.x - player.sprite.x;
       const dy = Math.abs(enemy.sprite.y - player.sprite.y);
-      if (Math.sign(dx) === player.facing && Math.abs(dx) <= range && dy <= 42) {
-        enemy.health -= damage;
+      if (Math.sign(dx) === player.facing && Math.abs(dx) <= move.range && dy <= 42) {
+        enemy.health -= move.damage;
         enemy.alertedUntil = time + 1600;
-        enemy.sprite.setVelocityX(player.facing * knockback);
+        enemy.sprite.setVelocityX(player.facing * move.knockback);
         enemy.sprite.setTintFill(0xffffff);
         this.time.delayedCall(70, () => enemy.sprite.clearTint());
         if (enemy.health <= 0) {

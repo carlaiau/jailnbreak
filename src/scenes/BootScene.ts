@@ -82,7 +82,7 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     this.createRect("tile", 32, 32, 0x4b5357, 0x252b2f);
     this.createCharacterAnimations();
-    this.scene.start("GameScene");
+    this.scene.start("TitleScene");
   }
 
   private createCharacterAnimations(): void {
