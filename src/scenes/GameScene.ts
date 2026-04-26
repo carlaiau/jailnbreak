@@ -4,6 +4,7 @@ import { enemyTargeting, nextMonsterGeneration } from "../game/rules";
 import type {
   EnemyKind,
   GeneratedLevel,
+  Platform,
   Room,
   PlayerId,
   PlayerStatus,
@@ -30,11 +31,14 @@ type PlayerActor = {
   spawn: SpawnPoint;
   damageCooldownUntil: number;
   attackCooldownUntil: number;
+  animationLockUntil: number;
 };
 
 type EnemyActor = {
   id: string;
   kind: EnemyKind;
+  packId?: string;
+  packIndex: number;
   generation: number;
   sprite: Phaser.Physics.Arcade.Sprite;
   health: number;
@@ -87,6 +91,7 @@ export class GameScene extends Phaser.Scene {
     );
     this.createBackground();
     this.createPlatforms();
+    this.createLadders();
     this.createLavaZones();
     this.createCrates();
     this.createPlayers();
@@ -114,30 +119,113 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createBackground(): void {
-    const g = this.add.graphics();
-    g.fillStyle(0x11161a, 1);
-    g.fillRect(0, 0, this.level.rooms.length * this.level.roomWidth, this.level.roomHeight);
+    const worldWidth = this.level.rooms.length * this.level.roomWidth;
+    this.add
+      .tileSprite(0, 0, worldWidth, this.level.roomHeight, "bg-wall-tile")
+      .setOrigin(0)
+      .setDepth(-40);
 
     for (const room of this.level.rooms) {
-      g.fillStyle(room.index % 2 === 0 ? 0x171e23 : 0x1b2226, 1);
-      g.fillRect(room.x, 0, room.width, room.height);
-      g.lineStyle(2, 0x384148, 1);
-      g.strokeRect(room.x + 12, 22, room.width - 24, room.height - 40);
-      g.lineStyle(3, 0x30383e, 1);
-      for (let x = room.x + 100; x < room.x + room.width - 80; x += 120) {
-        g.lineBetween(x, 64, x, 124);
-        g.lineBetween(x + 24, 64, x + 24, 124);
-        g.strokeRect(x - 8, 58, 44, 72);
-      }
+      this.addRoomWallVariants(room);
+      this.addRoomWindows(room);
+      this.addRoomDecor(room);
       if (room.index < this.level.rooms.length - 1) {
-        g.fillStyle(0x0b0e11, 1);
-        g.fillRect(room.x + room.width - 10, this.level.roomHeight - 132, 20, 96);
+        this.add
+          .rectangle(room.x + room.width - 10, this.level.roomHeight - 84, 20, 96, 0x06090b, 0.88)
+          .setDepth(-8);
       }
       if (room.floorKind === "lava") {
-        g.fillStyle(0x421713, 1);
-        g.fillRect(room.x, this.level.roomHeight - 42, room.width, 42);
+        this.add
+          .rectangle(room.x + room.width / 2, this.level.roomHeight - 21, room.width, 42, 0x421713, 0.7)
+          .setDepth(-7);
       }
     }
+  }
+
+  private addRoomWallVariants(room: Room): void {
+    const count = 5 + this.seededInt(room.index, 10, 4);
+
+    for (let i = 0; i < count; i += 1) {
+      const x = room.x + 96 + this.seededInt(room.index, 20 + i, room.width - 192);
+      const y = 96 + this.seededInt(room.index, 40 + i, room.height - 220);
+      const frame = this.seededInt(room.index, 60 + i, 8);
+      const alpha = 0.38 + this.seededInt(room.index, 80 + i, 28) / 100;
+
+      this.add
+        .image(x, y, "bg-wall-variants", frame)
+        .setAlpha(alpha)
+        .setDepth(-35);
+    }
+  }
+
+  private addRoomWindows(room: Room): void {
+    const windowCount = room.index % 2 === 0 ? 2 : 1;
+
+    for (let i = 0; i < windowCount; i += 1) {
+      const x =
+        room.x +
+        (windowCount === 1 ? room.width * 0.5 : room.width * (0.24 + i * 0.34)) +
+        this.seededInt(room.index, 100 + i, 38) -
+        19;
+      const y = 58 + this.seededInt(room.index, 120 + i, 18);
+
+      this.add
+        .image(x, y + 134, "bg-window-light-beam")
+        .setAlpha(0.42)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(-28);
+      this.add.image(x, y, "bg-barred-window").setDepth(-18);
+    }
+  }
+
+  private addRoomDecor(room: Room): void {
+    const ventX = room.x + 180 + this.seededInt(room.index, 180, room.width - 360);
+    const ventY = 250 + this.seededInt(room.index, 181, 180);
+    this.add.image(ventX, ventY, "bg-wall-vent").setAlpha(0.82).setDepth(-16);
+
+    if (room.index % 2 === 0) {
+      const lanternX = room.x + 78 + this.seededInt(room.index, 210, 72);
+      const lanternY = this.level.roomHeight - 246 - this.seededInt(room.index, 211, 90);
+      this.add
+        .image(lanternX, lanternY, "bg-lantern-glow")
+        .setAlpha(0.52)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(-22);
+      this.add.image(lanternX, lanternY, "bg-lantern").setDepth(-14);
+    }
+
+    const pipeScale = 0.55;
+    const pipeBaseX = room.x + 28 + this.seededInt(room.index, 230, 48);
+    const pipeBaseY = this.level.roomHeight - 72;
+    this.add
+      .image(pipeBaseX, pipeBaseY, "bg-pipe-set", 0)
+      .setScale(pipeScale)
+      .setAlpha(0.68)
+      .setDepth(-24);
+    this.add
+      .image(pipeBaseX, pipeBaseY - 34, "bg-pipe-set", 4)
+      .setScale(pipeScale)
+      .setAlpha(0.58)
+      .setDepth(-24);
+
+    if (room.index % 3 === 1) {
+      const sideY = this.level.roomHeight - 92;
+      this.add
+        .image(room.x + room.width - 78, sideY, "bg-pipe-set", 1)
+        .setScale(pipeScale)
+        .setAlpha(0.56)
+        .setDepth(-24);
+      this.add
+        .image(room.x + room.width - 42, sideY, "bg-pipe-set", 2)
+        .setScale(pipeScale)
+        .setAlpha(0.56)
+        .setDepth(-24);
+    }
+  }
+
+  private seededInt(roomIndex: number, salt: number, maxExclusive: number): number {
+    const value = Math.sin((this.level.seed + 1) * 12.9898 + roomIndex * 78.233 + salt * 37.719);
+    return Math.floor((value - Math.floor(value)) * maxExclusive);
   }
 
   private createPlatforms(): void {
@@ -146,14 +234,103 @@ export class GameScene extends Phaser.Scene {
       const body = this.platforms
         .create(platform.x + platform.width / 2, platform.y + platform.height / 2, "tile")
         .setDisplaySize(platform.width, platform.height)
+        .setVisible(false)
         .refreshBody();
       body.setData("platformId", platform.id);
 
+      this.renderPlatformArt(platform);
+    }
+  }
+
+  private renderPlatformArt(platform: Platform): void {
+    if (platform.height >= 32 && platform.width >= this.level.roomWidth - 1) {
+      this.renderFloorArt(platform);
+      return;
+    }
+
+    this.renderFloatingPlatformArt(platform);
+  }
+
+  private renderFloorArt(platform: Platform): void {
+    const y = platform.y - 4;
+    const pieceWidth = 64;
+    const middleWidth = Math.max(pieceWidth, platform.width - pieceWidth * 2);
+
+    this.add.image(platform.x, y, "floor-edge-left").setOrigin(0, 0).setDepth(1);
+    this.add
+      .tileSprite(platform.x + pieceWidth, y, middleWidth, 48, "floor-edge-middle")
+      .setOrigin(0, 0)
+      .setDepth(1);
+    this.add
+      .image(platform.x + platform.width - pieceWidth, y, "floor-edge-right")
+      .setOrigin(0, 0)
+      .setDepth(1);
+  }
+
+  private renderFloatingPlatformArt(platform: Platform): void {
+    const y = platform.y - 8;
+    const pieceWidth = 128;
+
+    if (platform.width < pieceWidth * 2) {
       this.add
-        .image(platform.x + platform.width / 2, platform.y + 5, "platform-edge")
-        .setDisplaySize(platform.width, 10)
+        .tileSprite(platform.x, y, platform.width, 48, "platform-middle")
+        .setOrigin(0, 0)
+        .setDepth(1);
+      return;
+    }
+
+    const middleWidth = platform.width - pieceWidth * 2;
+    this.add.image(platform.x, y, "platform-left").setOrigin(0, 0).setDepth(1);
+    if (middleWidth > 0) {
+      this.add
+        .tileSprite(platform.x + pieceWidth, y, middleWidth, 48, "platform-middle")
+        .setOrigin(0, 0)
         .setDepth(1);
     }
+    this.add
+      .image(platform.x + platform.width - pieceWidth, y, "platform-right")
+      .setOrigin(0, 0)
+      .setDepth(1);
+  }
+
+  private createLadders(): void {
+    for (const room of this.level.rooms) {
+      const platforms = [...room.platforms].sort((a, b) => b.y - a.y);
+      const ladderPairs = platforms
+        .slice(0, -1)
+        .map((lower, index) => ({ lower, upper: platforms[index + 1] }))
+        .filter(({ lower, upper }) => lower.y - upper.y >= 80)
+        .slice(0, room.floorKind === "lava" ? 2 : 1);
+
+      for (const { lower, upper } of ladderPairs) {
+        const overlapStart = Math.max(lower.x + 42, upper.x + 42);
+        const overlapEnd = Math.min(lower.x + lower.width - 42, upper.x + upper.width - 42);
+        const fallbackX = upper.x + upper.width * 0.5;
+        const ladderX = overlapStart < overlapEnd ? (overlapStart + overlapEnd) * 0.5 : fallbackX;
+        this.renderLadder(ladderX, upper.y + 16, lower.y + 3);
+      }
+    }
+  }
+
+  private renderLadder(x: number, topY: number, bottomY: number): void {
+    const height = Math.max(64, bottomY - topY);
+    this.add
+      .tileSprite(x, topY, 48, height, "ladder-shadow")
+      .setOrigin(0.5, 0)
+      .setAlpha(0.5)
+      .setDepth(0.45);
+    this.add.image(x, topY, "ladder-top").setOrigin(0.5, 0).setDepth(0.65);
+
+    const middleY = topY + 48;
+    const middleHeight = Math.max(0, height - 96);
+    if (middleHeight > 0) {
+      this.add
+        .tileSprite(x, middleY, 48, middleHeight, "ladder-middle")
+        .setOrigin(0.5, 0)
+        .setDepth(0.65);
+    }
+
+    this.add.image(x, bottomY - 64, "ladder-bottom").setOrigin(0.5, 0).setDepth(0.65);
   }
 
   private createLavaZones(): void {
@@ -165,11 +342,22 @@ export class GameScene extends Phaser.Scene {
       }
 
       const lava = this.lavaZones
-        .create(room.x + room.width / 2, this.level.roomHeight - 15, "lava")
+        .create(room.x + room.width / 2, this.level.roomHeight - 15, "tile")
         .setDisplaySize(room.width, 30)
-        .setDepth(2)
+        .setVisible(false)
         .refreshBody();
       lava.setData("roomId", room.id);
+
+      this.add
+        .tileSprite(room.x, this.level.roomHeight - 96, room.width, 96, "lava-glow")
+        .setOrigin(0, 0)
+        .setAlpha(0.72)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(0);
+      this.add
+        .tileSprite(room.x, this.level.roomHeight - 32, room.width, 32, "lava-tile")
+        .setOrigin(0, 0)
+        .setDepth(2);
     }
   }
 
@@ -222,10 +410,14 @@ export class GameScene extends Phaser.Scene {
     sprite.setDragX(950);
     sprite.setMaxVelocity(260, 620);
     sprite.setDepth(8);
-    sprite.body?.setSize(22, 38).setOffset(5, 8);
+    sprite.body?.setSize(24, 44).setOffset(20, 15);
+    sprite.play(`${texture}-idle`);
 
-    const boxOverlay = this.add.image(spawn.x, spawn.y, "crate").setDepth(9).setVisible(false);
-    boxOverlay.setAlpha(0.9);
+    const boxOverlay = this.add
+      .image(spawn.x, spawn.y, `crate-worn-${id}`)
+      .setDepth(9)
+      .setVisible(false);
+    boxOverlay.setAlpha(0.95);
 
     return {
       id,
@@ -243,7 +435,8 @@ export class GameScene extends Phaser.Scene {
       health: 3,
       spawn,
       damageCooldownUntil: 0,
-      attackCooldownUntil: 0
+      attackCooldownUntil: 0,
+      animationLockUntil: 0
     };
   }
 
@@ -251,6 +444,7 @@ export class GameScene extends Phaser.Scene {
     this.keySprite = this.physics.add.sprite(this.level.key.x, this.level.key.y, "key");
     (this.keySprite.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
     this.keySprite.setDepth(6);
+    this.keySprite.setScale(0.72);
 
     this.gateSprite = this.physics.add.staticSprite(
       this.level.exitGate.x,
@@ -258,6 +452,7 @@ export class GameScene extends Phaser.Scene {
       "gate"
     );
     this.gateSprite.setDepth(5);
+    this.gateSprite.body?.setSize(62, 96).setOffset(17, 28);
     this.gateSprite.refreshBody();
   }
 
@@ -274,6 +469,7 @@ export class GameScene extends Phaser.Scene {
         this.addEnemy({
           id: spawn.id,
           kind: spawn.kind,
+          packId: spawn.packId,
           generation: spawn.generation ?? 0,
           x: spawn.x,
           y: spawn.y,
@@ -287,6 +483,7 @@ export class GameScene extends Phaser.Scene {
   private addEnemy(config: {
     id: string;
     kind: EnemyKind;
+    packId?: string;
     generation: number;
     x: number;
     y: number;
@@ -299,25 +496,42 @@ export class GameScene extends Phaser.Scene {
     sprite.setDepth(7);
     sprite.setCollideWorldBounds(false);
     sprite.setBounce(0);
-    sprite.body?.setSize(config.kind === "guard" ? 24 : 24, config.kind === "guard" ? 36 : 24);
+    if (config.kind === "guard") {
+      sprite.body?.setSize(24, 44).setOffset(20, 14);
+      sprite.play("guard-walk");
+    } else {
+      sprite.body?.setSize(34, 30).setOffset(15, 22);
+      sprite.play(`${texture}-walk`);
+    }
     this.enemies.add(sprite);
 
     const scale = config.kind === "monster" ? 1 - config.generation * 0.16 : 1;
     sprite.setScale(scale);
 
+    const packMate = config.packId
+      ? this.enemyActors.find((enemy) => enemy.packId === config.packId)
+      : undefined;
+
     this.enemyActors.push({
       id: config.id,
       kind: config.kind,
+      packId: config.packId,
+      packIndex: this.getPackIndex(config.id),
       generation: config.generation,
       sprite,
       health: config.kind === "guard" ? 3 : 2,
-      direction: Math.random() > 0.5 ? 1 : -1,
+      direction: packMate?.direction ?? (Math.random() > 0.5 ? 1 : -1),
       speed: config.kind === "guard" ? 74 : 58 + config.generation * 14,
       patrolStart: config.patrolStart,
       patrolEnd: config.patrolEnd,
       alertedUntil: 0,
       attackCooldownUntil: 0
     });
+  }
+
+  private getPackIndex(id: string): number {
+    const match = id.match(/-(\d+)$/);
+    return match ? Number(match[1]) : 0;
   }
 
   private createHud(): void {
@@ -401,10 +615,32 @@ export class GameScene extends Phaser.Scene {
 
     player.sprite.setFlipX(player.facing === -1);
     player.sprite.setAlpha(player.damageCooldownUntil > time ? 0.62 : 1);
+    this.updatePlayerAnimation(player, body, time);
     player.boxOverlay
       .setPosition(player.sprite.x, player.sprite.y + 3)
       .setVisible(player.status.hidden)
       .setFlipX(player.facing === -1);
+  }
+
+  private updatePlayerAnimation(
+    player: PlayerActor,
+    body: Phaser.Physics.Arcade.Body,
+    time: number
+  ): void {
+    if (time < player.animationLockUntil) {
+      return;
+    }
+
+    const texture = player.sprite.texture.key;
+    if (player.damageCooldownUntil > time && player.health <= 1) {
+      player.sprite.play(`${texture}-hurt`, true);
+    } else if (!body.blocked.down) {
+      player.sprite.play(`${texture}-jump`, true);
+    } else if (Math.abs(body.velocity.x) > 8) {
+      player.sprite.play(`${texture}-run`, true);
+    } else {
+      player.sprite.play(`${texture}-idle`, true);
+    }
   }
 
   private toggleHide(player: PlayerActor): void {
@@ -437,7 +673,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     player.attackCooldownUntil = time + ATTACK_COOLDOWN;
+    player.animationLockUntil = time + 260;
     player.status.recentlyAttackedUntil = time + 700;
+    player.sprite.play(`${player.sprite.texture.key}-${damage > 1 ? "kick" : "punch"}`, true);
     this.spawnSpark(player.sprite.x + player.facing * 30, player.sprite.y - 4);
 
     for (const enemy of [...this.enemyActors]) {
@@ -463,24 +701,102 @@ export class GameScene extends Phaser.Scene {
 
     const target = this.findTarget(enemy, time);
     if (target) {
-      const direction = target.sprite.x >= enemy.sprite.x ? 1 : -1;
+      const targetX = this.getEnemyTargetX(enemy, target.sprite.x);
+      const direction = targetX >= enemy.sprite.x ? 1 : -1;
       enemy.direction = direction;
+      this.syncGuardPackDirection(enemy, direction);
       const nextX = enemy.sprite.x + direction * 3;
       if (nextX >= enemy.patrolStart && nextX <= enemy.patrolEnd) {
-        enemy.sprite.setVelocityX(direction * enemy.speed * 1.25);
+        const correction = Phaser.Math.Clamp((targetX - enemy.sprite.x) * 2.5, -70, 70);
+        enemy.sprite.setVelocityX(direction * enemy.speed * 1.15 + correction);
       } else {
         enemy.sprite.setVelocityX(0);
       }
     } else {
+      this.updateEnemyPatrol(enemy);
+    }
+
+    enemy.sprite.setFlipX(enemy.direction === -1);
+    const currentAnimation = enemy.sprite.anims.currentAnim?.key;
+    if (!currentAnimation?.endsWith("attack") || !enemy.sprite.anims.isPlaying) {
+      enemy.sprite.play(
+        enemy.kind === "guard" ? "guard-walk" : `${enemy.sprite.texture.key}-walk`,
+        true
+      );
+    }
+  }
+
+  private updateEnemyPatrol(enemy: EnemyActor): void {
+    if (enemy.kind !== "guard" || !enemy.packId) {
       if (enemy.sprite.x <= enemy.patrolStart) {
         enemy.direction = 1;
       } else if (enemy.sprite.x >= enemy.patrolEnd) {
         enemy.direction = -1;
       }
       enemy.sprite.setVelocityX(enemy.direction * enemy.speed);
+      return;
     }
 
-    enemy.sprite.setFlipX(enemy.direction === -1);
+    const members = this.getGuardPackMembers(enemy);
+    const minX = Math.min(...members.map((member) => member.sprite.x));
+    const maxX = Math.max(...members.map((member) => member.sprite.x));
+    if (minX <= enemy.patrolStart) {
+      this.syncGuardPackDirection(enemy, 1);
+    } else if (maxX >= enemy.patrolEnd) {
+      this.syncGuardPackDirection(enemy, -1);
+    }
+
+    const desiredX = this.getGuardFormationX(enemy);
+    const correction = Phaser.Math.Clamp((desiredX - enemy.sprite.x) * 2, -45, 45);
+    enemy.sprite.setVelocityX(enemy.direction * enemy.speed + correction);
+  }
+
+  private getEnemyTargetX(enemy: EnemyActor, targetX: number): number {
+    if (enemy.kind !== "guard" || !enemy.packId) {
+      return targetX;
+    }
+
+    return targetX + this.getGuardFormationOffset(enemy);
+  }
+
+  private getGuardFormationX(enemy: EnemyActor): number {
+    const members = this.getGuardPackMembers(enemy);
+    const averageX = members.reduce((sum, member) => sum + member.sprite.x, 0) / members.length;
+    const averageOffset =
+      members.reduce((sum, member) => sum + this.getGuardFormationOffset(member), 0) / members.length;
+    const anchorX = averageX - averageOffset;
+
+    return anchorX + this.getGuardFormationOffset(enemy);
+  }
+
+  private getGuardFormationOffset(enemy: EnemyActor): number {
+    const members = this.getGuardPackMembers(enemy);
+    const sorted = [...members].sort((a, b) => a.packIndex - b.packIndex);
+    const slot = sorted.findIndex((member) => member === enemy);
+    const center = (sorted.length - 1) / 2;
+
+    return (slot - center) * 46;
+  }
+
+  private getGuardPackMembers(enemy: EnemyActor): EnemyActor[] {
+    if (!enemy.packId) {
+      return [enemy];
+    }
+
+    return this.enemyActors.filter(
+      (member) => member.kind === "guard" && member.packId === enemy.packId && member.sprite.active
+    );
+  }
+
+  private syncGuardPackDirection(enemy: EnemyActor, direction: 1 | -1): void {
+    if (enemy.kind !== "guard" || !enemy.packId) {
+      enemy.direction = direction;
+      return;
+    }
+
+    for (const member of this.getGuardPackMembers(enemy)) {
+      member.direction = direction;
+    }
   }
 
   private findTarget(enemy: EnemyActor, time: number): PlayerActor | undefined {
@@ -530,6 +846,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     enemy.attackCooldownUntil = time + 650;
+    enemy.sprite.play(
+      enemy.kind === "guard" ? "guard-attack" : `${enemy.sprite.texture.key}-attack`,
+      true
+    );
     this.damagePlayer(player, time);
   }
 
@@ -603,7 +923,7 @@ export class GameScene extends Phaser.Scene {
 
     this.won = true;
     this.level.exitGate.isOpen = true;
-    this.gateSprite.setTint(0xffdd55);
+    this.gateSprite.setTexture("gate-open");
     this.statusText.setText("FREEDOM");
     this.physics.pause();
   }
@@ -630,10 +950,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnSpark(x: number, y: number): void {
-    const spark = this.add.image(x, y, "spark").setDepth(20);
+    const spark = this.add.image(x, y, "spark").setScale(0.35).setDepth(20);
     this.tweens.add({
       targets: spark,
-      scale: 2.4,
+      scale: 0.85,
       alpha: 0,
       duration: 140,
       onComplete: () => spark.destroy()

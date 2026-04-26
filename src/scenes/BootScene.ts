@@ -5,21 +5,150 @@ export class BootScene extends Phaser.Scene {
     super("BootScene");
   }
 
+  preload(): void {
+    const backgroundBase = "/assets/jailbreak/background";
+    const platformBase = "/assets/jailbreak/platforms";
+    const characterBase = "/assets/jailbreak/characters";
+    const ladderBase = "/assets/jailbreak/ladders";
+    const objectBase = "/assets/jailbreak/objects";
+
+    this.load.image("bg-wall-tile", `${backgroundBase}/wall-brick-tile.png`);
+    this.load.spritesheet("bg-wall-variants", `${backgroundBase}/wall-brick-variants.png`, {
+      frameWidth: 128,
+      frameHeight: 128
+    });
+    this.load.image("bg-barred-window", `${backgroundBase}/barred-window.png`);
+    this.load.image("bg-window-light-beam", `${backgroundBase}/window-light-beam.png`);
+    this.load.spritesheet("bg-pipe-set", `${backgroundBase}/pipe-set.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+    this.load.image("bg-wall-vent", `${backgroundBase}/wall-vent.png`);
+    this.load.image("bg-lantern", `${backgroundBase}/lantern.png`);
+    this.load.image("bg-lantern-glow", `${backgroundBase}/lantern-glow.png`);
+
+    this.load.image("platform-left", `${platformBase}/platform-left.png`);
+    this.load.image("platform-middle", `${platformBase}/platform-middle.png`);
+    this.load.image("platform-right", `${platformBase}/platform-right.png`);
+    this.load.image("floor-edge-left", `${platformBase}/floor-edge-left.png`);
+    this.load.image("floor-edge-middle", `${platformBase}/floor-edge-middle.png`);
+    this.load.image("floor-edge-right", `${platformBase}/floor-edge-right.png`);
+    this.load.image("floor-tile", `${platformBase}/floor-tile.png`);
+    this.load.image("lava-tile", `${platformBase}/lava-tile.png`);
+    this.load.image("lava-glow", `${platformBase}/lava-glow.png`);
+
+    this.load.image("ladder-top", `${ladderBase}/ladder-top.png`);
+    this.load.image("ladder-middle", `${ladderBase}/ladder-middle.png`);
+    this.load.image("ladder-bottom", `${ladderBase}/ladder-bottom.png`);
+    this.load.image("ladder-shadow", `${ladderBase}/ladder-shadow.png`);
+
+    this.load.image("crate", `${objectBase}/crate.png`);
+    this.load.image("crate-worn-p1", `${objectBase}/crate-worn-p1.png`);
+    this.load.image("crate-worn-p2", `${objectBase}/crate-worn-p2.png`);
+    this.load.image("key", `${objectBase}/key.png`);
+    this.load.image("gate", `${objectBase}/exit-gate-closed.png`);
+    this.load.image("gate-open", `${objectBase}/exit-gate-open.png`);
+    this.load.image("spark", `${objectBase}/hit-spark.png`);
+
+    this.load.spritesheet("player-p1", `${characterBase}/player-p1.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+    this.load.spritesheet("player-p2", `${characterBase}/player-p2.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+    this.load.spritesheet("guard", `${characterBase}/guard.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+    this.load.spritesheet("monster-0", `${characterBase}/monster-large.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+    this.load.spritesheet("monster-1", `${characterBase}/monster-medium.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+    this.load.spritesheet("monster-2", `${characterBase}/monster-small.png`, {
+      frameWidth: 64,
+      frameHeight: 64
+    });
+  }
+
   create(): void {
     this.createRect("tile", 32, 32, 0x4b5357, 0x252b2f);
-    this.createRect("platform-edge", 32, 8, 0x8c7b64, 0x473c32);
-    this.createLava();
-    this.createPlayer("player-p1", 0x48c7c7, 0xf4ead5);
-    this.createPlayer("player-p2", 0xffca4f, 0xf4ead5);
-    this.createGuard();
-    this.createMonster("monster-0", 0x9b59d0, 34, 18, 6, 2);
-    this.createMonster("monster-1", 0x46b17b, 26, 14, 5, 1);
-    this.createMonster("monster-2", 0xde5f5f, 18, 10, 4, 1);
-    this.createCrate();
-    this.createKey();
-    this.createGate();
-    this.createSpark();
+    this.createCharacterAnimations();
     this.scene.start("GameScene");
+  }
+
+  private createCharacterAnimations(): void {
+    for (const key of ["player-p1", "player-p2"]) {
+      this.anims.create({
+        key: `${key}-idle`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [0, 1, 2, 3] }),
+        frameRate: 4,
+        repeat: -1
+      });
+      this.anims.create({
+        key: `${key}-run`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [12, 13, 14, 15, 16, 17, 18, 19] }),
+        frameRate: 10,
+        repeat: -1
+      });
+      this.anims.create({
+        key: `${key}-jump`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [8, 9, 10, 11] }),
+        frameRate: 8,
+        repeat: -1
+      });
+      this.anims.create({
+        key: `${key}-kick`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [20, 21, 22, 23] }),
+        frameRate: 12,
+        repeat: 0
+      });
+      this.anims.create({
+        key: `${key}-punch`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [24, 25, 26, 27] }),
+        frameRate: 12,
+        repeat: 0
+      });
+      this.anims.create({
+        key: `${key}-hurt`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [28, 29, 30, 31] }),
+        frameRate: 7,
+        repeat: -1
+      });
+    }
+
+    this.anims.create({
+      key: "guard-walk",
+      frames: this.anims.generateFrameNumbers("guard", { frames: [0, 1, 2, 3, 4, 5, 6, 7] }),
+      frameRate: 8,
+      repeat: -1
+    });
+    this.anims.create({
+      key: "guard-attack",
+      frames: this.anims.generateFrameNumbers("guard", { frames: [12, 13, 14, 15] }),
+      frameRate: 10,
+      repeat: 0
+    });
+
+    for (const key of ["monster-0", "monster-1", "monster-2"]) {
+      this.anims.create({
+        key: `${key}-walk`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [0, 1, 2, 3, 4, 5, 6, 7] }),
+        frameRate: 7,
+        repeat: -1
+      });
+      this.anims.create({
+        key: `${key}-attack`,
+        frames: this.anims.generateFrameNumbers(key, { frames: [8, 9, 10, 11] }),
+        frameRate: 10,
+        repeat: 0
+      });
+    }
   }
 
   private createRect(key: string, width: number, height: number, fill: number, stroke: number): void {
