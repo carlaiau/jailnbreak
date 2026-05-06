@@ -21,6 +21,38 @@ type ControlSet = {
   hide: Phaser.Input.Keyboard.Key;
 };
 
+type ControlAction = keyof ControlSet;
+type ControlSnapshot = Record<ControlAction, boolean>;
+type TouchPresses = Record<PlayerId, Record<ControlAction, Set<number>>>;
+
+type MobilePadSide = "left" | "right";
+type MobileControlObject = Phaser.GameObjects.GameObject & Phaser.GameObjects.Components.Visible;
+
+type MobileActionButton = {
+  action: "up" | "hide" | "attack";
+  x: number;
+  y: number;
+  radius: number;
+  fill: number;
+  activeFill: number;
+  background: Phaser.GameObjects.Arc;
+  label: Phaser.GameObjects.Text;
+};
+
+type MobilePad = {
+  playerId: PlayerId;
+  side: MobilePadSide;
+  panelZone: Phaser.GameObjects.Zone;
+  objects: MobileControlObject[];
+  stickCenter: Phaser.Math.Vector2;
+  stickRadius: number;
+  stickSurface: Phaser.GameObjects.Graphics;
+  stickAccent: number;
+  stickPointerId?: number;
+  actionPointerIds: Set<number>;
+  buttons: MobileActionButton[];
+};
+
 type AttackMove = {
   animation: "punch" | "kick";
   range: number;
@@ -77,6 +109,20 @@ const ATTACK_MOVES: AttackMove[] = [
   { animation: "punch", range: 38, damage: 1, knockback: 150 },
   { animation: "kick", range: 52, damage: 2, knockback: 270 }
 ];
+const CONTROL_ACTIONS: ControlAction[] = ["left", "right", "up", "down", "attack", "hide"];
+const MOBILE_PAD_DEPTH = 80;
+const MOBILE_ONE_PLAYER_PANEL_WIDTH = 220;
+const MOBILE_TWO_PLAYER_PANEL_WIDTH = 190;
+const MOBILE_ACTION_BUTTON_RADIUS = 38;
+const MOBILE_ACTION_BUTTON_EDGE_OFFSET = 62;
+const MOBILE_ACTION_BUTTON_BOTTOM_OFFSETS = {
+  jump: 240,
+  hide: 325,
+  attack: 410
+};
+const MOBILE_STICK_RADIUS = 70;
+const MOBILE_STICK_DEAD_ZONE_X = 18;
+const MOBILE_STICK_DEAD_ZONE_Y = 24;
 
 export class GameScene extends Phaser.Scene {
   private level!: GeneratedLevel;
@@ -93,6 +139,15 @@ export class GameScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;
   private won = false;
   private playerCount: PlayerCount = 2;
+  private touchPresses!: TouchPresses;
+  private previousControls!: Record<PlayerId, ControlSnapshot>;
+  private mobilePads: MobilePad[] = [];
+  private mobileControlsVisible = false;
+  private mobileViewportListener?: () => void;
+  private mobileReleaseListener?: () => void;
+  private mobileControlsArmedAt = 0;
+  private uiCamera?: Phaser.Cameras.Scene2D.Camera;
+  private worldObjects: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super("GameScene");
@@ -107,6 +162,13 @@ export class GameScene extends Phaser.Scene {
     this.won = false;
     this.enemyActors = [];
     this.players = [];
+    this.mobilePads = [];
+    this.touchPresses = this.createTouchPresses();
+    this.previousControls = this.createControlSnapshots();
+    this.mobileControlsVisible = false;
+    this.mobileControlsArmedAt = 0;
+    this.uiCamera = undefined;
+    this.worldObjects = [];
 
     this.physics.world.setBounds(0, 0, this.level.rooms.length * this.level.roomWidth, this.level.roomHeight);
     this.cameras.main.setBounds(
@@ -123,7 +185,10 @@ export class GameScene extends Phaser.Scene {
     this.createPlayers();
     this.createCollectibles();
     this.createEnemies();
+    this.worldObjects = [...this.children.list];
     this.createHud();
+    this.createMobileControls();
+    this.configureUiCamera();
     this.wireCollisions();
 
     this.input.keyboard?.on("keydown-ONE", () => this.switchPlayerCount(1));
@@ -487,29 +552,46 @@ export class GameScene extends Phaser.Scene {
       throw new Error("Keyboard input is required");
     }
 
-    const p1 = this.createPlayer("p1", "player-p1", this.level.playerSpawns.p1, {
+    const p1Controls =
+      this.playerCount === 1
+        ? this.createArrowKeyboardControls(keyboard)
+        : this.createWasdKeyboardControls(keyboard);
+    const p1 = this.createPlayer("p1", "player-p1", this.level.playerSpawns.p1, p1Controls);
+
+    this.players.push(p1);
+
+    if (this.playerCount === 2) {
+      const p2 = this.createPlayer(
+        "p2",
+        "player-p2",
+        this.level.playerSpawns.p2,
+        this.createArrowKeyboardControls(keyboard)
+      );
+
+      this.players.push(p2);
+    }
+  }
+
+  private createWasdKeyboardControls(keyboard: Phaser.Input.Keyboard.KeyboardPlugin): ControlSet {
+    return {
       left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
       down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
       hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
-    });
+    };
+  }
 
-    this.players.push(p1);
-
-    if (this.playerCount === 2) {
-      const p2 = this.createPlayer("p2", "player-p2", this.level.playerSpawns.p2, {
-        left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
-        right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
-        up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-        down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-        attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
-        hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
-      });
-
-      this.players.push(p2);
-    }
+  private createArrowKeyboardControls(keyboard: Phaser.Input.Keyboard.KeyboardPlugin): ControlSet {
+    return {
+      left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+      right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
+      up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+      attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
+      hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
+    };
   }
 
   private createPlayer(
@@ -618,6 +700,7 @@ export class GameScene extends Phaser.Scene {
       sprite.play(`${texture}-walk`);
     }
     this.enemies.add(sprite);
+    this.uiCamera?.ignore(sprite);
 
     const scale = config.kind === "monster" ? 1 - config.generation * 0.16 : 1;
     sprite.setScale(scale);
@@ -672,6 +755,473 @@ export class GameScene extends Phaser.Scene {
       .setDepth(51);
   }
 
+  private createMobileControls(): void {
+    const extraPointersNeeded = Math.max(0, 6 - this.input.manager.pointersTotal);
+    if (extraPointersNeeded > 0) {
+      this.input.addPointer(extraPointersNeeded);
+    }
+
+    this.mobilePads =
+      this.playerCount === 1
+        ? [this.createMobilePad("p1", "right")]
+        : [this.createMobilePad("p1", "left"), this.createMobilePad("p2", "right")];
+
+    this.input.on("pointermove", this.handleMobilePointerMove, this);
+    this.input.on("pointerup", this.handleMobilePointerUp, this);
+    this.input.on("pointerupoutside", this.handleMobilePointerUp, this);
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.refreshMobileControls, this);
+
+    this.mobileViewportListener = () => this.refreshMobileControls();
+    this.mobileReleaseListener = () => this.releaseAllMobileControls();
+    window.addEventListener("resize", this.mobileViewportListener);
+    window.addEventListener("orientationchange", this.mobileViewportListener);
+    window.addEventListener("blur", this.mobileReleaseListener);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.destroyMobileControls());
+
+    this.mobileControlsArmedAt = this.time.now + 220;
+    this.refreshMobileControls();
+  }
+
+  private createMobilePad(playerId: PlayerId, side: MobilePadSide): MobilePad {
+    const { width, height } = this.scale;
+    const isRight = side === "right";
+    const panelWidth = this.getMobilePanelWidth();
+    const panelX = isRight ? width - panelWidth : 0;
+    const panelFill = playerId === "p1" ? 0x17333a : 0x2c2b3f;
+    const accent = playerId === "p1" ? 0x7bd8d0 : 0xf8d66d;
+    const mutedFill = 0x1a252a;
+    const objects: MobileControlObject[] = [];
+
+    const panel = this.add
+      .rectangle(panelX, 0, panelWidth, height, panelFill, 0.9)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH);
+    const edgeX = isRight ? panelX : panelX + panelWidth;
+    const edge = this.add
+      .rectangle(edgeX, 0, 2, height, accent, 0.28)
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH + 1);
+
+    const tag = this.add
+      .text(isRight ? width - 24 : 24, 22, playerId.toUpperCase(), {
+        fontFamily: "ui-monospace, monospace",
+        fontSize: "14px",
+        color: "#f6f0e2"
+      })
+      .setOrigin(isRight ? 1 : 0, 0)
+      .setAlpha(0.72)
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH + 2);
+
+    const stickCenter = new Phaser.Math.Vector2(isRight ? width - 78 : 78, height - 76);
+    const stickSurface = this.add
+      .graphics()
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH + 3);
+
+    const buttonX = isRight ? width - MOBILE_ACTION_BUTTON_EDGE_OFFSET : MOBILE_ACTION_BUTTON_EDGE_OFFSET;
+    const jumpButton = this.createMobileActionButton(
+      "up",
+      buttonX,
+      height - MOBILE_ACTION_BUTTON_BOTTOM_OFFSETS.jump,
+      mutedFill,
+      0xf8d66d,
+      "J"
+    );
+    const hideButton = this.createMobileActionButton(
+      "hide",
+      buttonX,
+      height - MOBILE_ACTION_BUTTON_BOTTOM_OFFSETS.hide,
+      mutedFill,
+      0x7bd8d0,
+      "H"
+    );
+    const attackButton = this.createMobileActionButton(
+      "attack",
+      buttonX,
+      height - MOBILE_ACTION_BUTTON_BOTTOM_OFFSETS.attack,
+      mutedFill,
+      0xf08562,
+      "A"
+    );
+
+    const panelZone = this.add
+      .zone(panelX, 0, panelWidth, height)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH + 10)
+      .setInteractive();
+
+    const pad: MobilePad = {
+      playerId,
+      side,
+      panelZone,
+      objects,
+      stickCenter,
+      stickRadius: MOBILE_STICK_RADIUS,
+      stickSurface,
+      stickAccent: accent,
+      actionPointerIds: new Set(),
+      buttons: [jumpButton, hideButton, attackButton]
+    };
+
+    panelZone.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handleMobilePadPointerDown(pad, pointer));
+    objects.push(
+      panel,
+      edge,
+      tag,
+      stickSurface,
+      jumpButton.background,
+      jumpButton.label,
+      hideButton.background,
+      hideButton.label,
+      attackButton.background,
+      attackButton.label
+    );
+    return pad;
+  }
+
+  private createMobileActionButton(
+    action: "up" | "hide" | "attack",
+    x: number,
+    y: number,
+    fill: number,
+    activeFill: number,
+    label: string
+  ): MobileActionButton {
+    const radius = MOBILE_ACTION_BUTTON_RADIUS;
+    const background = this.add
+      .circle(x, y, radius, fill, 0.66)
+      .setStrokeStyle(2, 0xf6f0e2, 0.35)
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH + 3);
+    const text = this.add
+      .text(x, y - 1, label, {
+        fontFamily: "ui-monospace, monospace",
+        fontSize: "28px",
+        color: "#f6f0e2",
+        fontStyle: "700"
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(MOBILE_PAD_DEPTH + 4);
+
+    return { action, x, y, radius, fill, activeFill, background, label: text };
+  }
+
+  private refreshMobileControls(): void {
+    const visible = this.shouldShowMobileControls();
+    this.mobileControlsVisible = visible;
+    this.refreshMobileCameraViewport();
+
+    for (const pad of this.mobilePads) {
+      pad.panelZone.setActive(visible).setVisible(visible);
+      for (const object of pad.objects) {
+        object.setVisible(visible);
+      }
+      this.refreshMobilePadVisuals(pad);
+    }
+
+    if (!visible) {
+      this.releaseAllMobileControls();
+    }
+  }
+
+  private configureUiCamera(): void {
+    const uiObjects = this.getUiObjects();
+    this.cameras.main.ignore(uiObjects);
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.ignore(this.worldObjects);
+    this.refreshMobileCameraViewport();
+  }
+
+  private getUiObjects(): Phaser.GameObjects.GameObject[] {
+    return [
+      this.hud,
+      this.statusText,
+      ...this.mobilePads.flatMap((pad) => [pad.panelZone, ...pad.objects])
+    ];
+  }
+
+  private refreshMobileCameraViewport(): void {
+    const { width, height } = this.scale;
+    const { left, right } = this.getMobileSafeInsets();
+    const safeWidth = Math.max(1, width - left - right);
+
+    this.cameras.main.setViewport(left, 0, safeWidth, height);
+    this.uiCamera?.setViewport(0, 0, width, height);
+    this.hud?.setPosition(left + 16, 12);
+    this.statusText?.setPosition(left + safeWidth / 2, 48);
+  }
+
+  private getMobileSafeInsets(): { left: number; right: number } {
+    if (!this.mobileControlsVisible) {
+      return { left: 0, right: 0 };
+    }
+
+    const panelWidth = this.getMobilePanelWidth();
+    return {
+      left: this.playerCount === 2 ? panelWidth : 0,
+      right: panelWidth
+    };
+  }
+
+  private getMobilePanelWidth(): number {
+    return this.playerCount === 1 ? MOBILE_ONE_PLAYER_PANEL_WIDTH : MOBILE_TWO_PLAYER_PANEL_WIDTH;
+  }
+
+  private shouldShowMobileControls(): boolean {
+    const touchControlsParam = new URLSearchParams(window.location.search).get("touchControls");
+    if (touchControlsParam === "1") {
+      return true;
+    }
+    if (touchControlsParam === "0") {
+      return false;
+    }
+
+    const landscape = window.innerWidth > window.innerHeight;
+    const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    return landscape && (coarsePointer || this.sys.game.device.input.touch);
+  }
+
+  private handleMobilePadPointerDown(pad: MobilePad, pointer: Phaser.Input.Pointer): void {
+    if (!this.mobileControlsVisible || this.time.now < this.mobileControlsArmedAt) {
+      return;
+    }
+
+    const button = this.getMobileButtonUnderPointer(pad, pointer);
+    if (button) {
+      pad.actionPointerIds.add(pointer.id);
+      this.updateMobileActionPointer(pad, pointer);
+      return;
+    }
+
+    if (pad.stickPointerId !== undefined || !this.isPointerInStickArea(pad, pointer)) {
+      return;
+    }
+
+    pad.stickPointerId = pointer.id;
+    this.updateMobileStick(pad, pointer);
+  }
+
+  private handleMobilePointerMove(pointer: Phaser.Input.Pointer): void {
+    if (!this.mobileControlsVisible) {
+      return;
+    }
+
+    for (const pad of this.mobilePads) {
+      if (pad.stickPointerId === pointer.id) {
+        this.updateMobileStick(pad, pointer);
+      }
+      if (pad.actionPointerIds.has(pointer.id)) {
+        this.updateMobileActionPointer(pad, pointer);
+      }
+    }
+  }
+
+  private handleMobilePointerUp(pointer: Phaser.Input.Pointer): void {
+    for (const pad of this.mobilePads) {
+      this.releaseMobilePointer(pad, pointer.id);
+    }
+  }
+
+  private updateMobileStick(pad: MobilePad, pointer: Phaser.Input.Pointer): void {
+    const dx = pointer.x - pad.stickCenter.x;
+    const dy = pointer.y - pad.stickCenter.y;
+
+    this.clearPointerActions(pad.playerId, pointer.id, ["left", "right", "up"]);
+
+    if (dx < -MOBILE_STICK_DEAD_ZONE_X) {
+      this.setTouchAction(pad.playerId, "left", pointer.id, true);
+    } else if (dx > MOBILE_STICK_DEAD_ZONE_X) {
+      this.setTouchAction(pad.playerId, "right", pointer.id, true);
+    }
+
+    if (dy < -MOBILE_STICK_DEAD_ZONE_Y) {
+      this.setTouchAction(pad.playerId, "up", pointer.id, true);
+    }
+
+    this.refreshMobilePadVisuals(pad);
+  }
+
+  private updateMobileActionPointer(pad: MobilePad, pointer: Phaser.Input.Pointer): void {
+    this.clearPointerActions(pad.playerId, pointer.id, ["up", "hide", "attack"]);
+    const button = this.getMobileButtonUnderPointer(pad, pointer);
+    if (button) {
+      this.setTouchAction(pad.playerId, button.action, pointer.id, true);
+    }
+    this.refreshMobilePadVisuals(pad);
+  }
+
+  private releaseMobilePointer(pad: MobilePad, pointerId: number): void {
+    if (pad.stickPointerId === pointerId) {
+      pad.stickPointerId = undefined;
+      this.clearPointerActions(pad.playerId, pointerId, ["left", "right", "up"]);
+    }
+
+    if (pad.actionPointerIds.delete(pointerId)) {
+      this.clearPointerActions(pad.playerId, pointerId, ["up", "hide", "attack"]);
+    }
+
+    this.refreshMobilePadVisuals(pad);
+  }
+
+  private releaseAllMobileControls(): void {
+    if (!this.touchPresses) {
+      return;
+    }
+
+    this.touchPresses = this.createTouchPresses();
+    for (const pad of this.mobilePads) {
+      pad.stickPointerId = undefined;
+      pad.actionPointerIds.clear();
+      this.refreshMobilePadVisuals(pad);
+    }
+  }
+
+  private destroyMobileControls(): void {
+    this.input.off("pointermove", this.handleMobilePointerMove, this);
+    this.input.off("pointerup", this.handleMobilePointerUp, this);
+    this.input.off("pointerupoutside", this.handleMobilePointerUp, this);
+    this.scale.off(Phaser.Scale.Events.RESIZE, this.refreshMobileControls, this);
+
+    if (this.mobileViewportListener) {
+      window.removeEventListener("resize", this.mobileViewportListener);
+      window.removeEventListener("orientationchange", this.mobileViewportListener);
+      this.mobileViewportListener = undefined;
+    }
+
+    if (this.mobileReleaseListener) {
+      window.removeEventListener("blur", this.mobileReleaseListener);
+      this.mobileReleaseListener = undefined;
+    }
+
+    this.releaseAllMobileControls();
+  }
+
+  private getMobileButtonUnderPointer(
+    pad: MobilePad,
+    pointer: Phaser.Input.Pointer
+  ): MobileActionButton | undefined {
+    return pad.buttons.find(
+      (button) => Phaser.Math.Distance.Between(pointer.x, pointer.y, button.x, button.y) <= button.radius + 12
+    );
+  }
+
+  private isPointerInStickArea(pad: MobilePad, pointer: Phaser.Input.Pointer): boolean {
+    const dx = pointer.x - pad.stickCenter.x;
+    const dy = pointer.y - pad.stickCenter.y;
+    const radius = pad.stickRadius + 18;
+
+    return (
+      dx * dx + dy * dy <= radius * radius &&
+      pointer.y <= pad.stickCenter.y + 18 &&
+      pointer.y >= pad.stickCenter.y - radius
+    );
+  }
+
+  private refreshMobilePadVisuals(pad: MobilePad): void {
+    this.drawMobileStickSurface(pad);
+
+    for (const button of pad.buttons) {
+      const active = this.touchPresses[pad.playerId][button.action].size > 0;
+      button.background
+        .setFillStyle(active ? button.activeFill : button.fill, active ? 0.9 : 0.66)
+        .setStrokeStyle(active ? 3 : 2, active ? 0xffffff : 0xf6f0e2, active ? 0.78 : 0.35);
+      button.label.setColor(active ? "#101214" : "#f6f0e2");
+    }
+  }
+
+  private drawMobileStickSurface(pad: MobilePad): void {
+    const activeLeft = this.touchPresses[pad.playerId].left.size > 0;
+    const activeRight = this.touchPresses[pad.playerId].right.size > 0;
+    const activeUp = this.touchPresses[pad.playerId].up.size > 0;
+    const active = activeLeft || activeRight || activeUp;
+    const { x, y } = pad.stickCenter;
+    const radius = pad.stickRadius;
+    const graphics = pad.stickSurface;
+
+    graphics.clear();
+    this.fillMobileStickSlice(graphics, x, y, radius, Math.PI, Math.PI * 2, 0x081014, 0.64);
+
+    if (activeLeft) {
+      this.fillMobileStickSlice(graphics, x, y, radius, Math.PI, (Math.PI * 4) / 3, pad.stickAccent, 0.46);
+    }
+    if (activeUp) {
+      this.fillMobileStickSlice(graphics, x, y, radius, (Math.PI * 4) / 3, (Math.PI * 5) / 3, pad.stickAccent, 0.46);
+    }
+    if (activeRight) {
+      this.fillMobileStickSlice(graphics, x, y, radius, (Math.PI * 5) / 3, Math.PI * 2, pad.stickAccent, 0.46);
+    }
+
+    graphics.lineStyle(2, 0xf6f0e2, 0.2);
+    graphics.lineBetween(x - radius, y, x + radius, y);
+    graphics.lineStyle(active ? 3 : 2, active ? 0xffffff : pad.stickAccent, active ? 0.66 : 0.44);
+    graphics.strokePoints(this.getArcEdgePoints(x, y, radius, Math.PI, Math.PI * 2, 28), false, false);
+  }
+
+  private fillMobileStickSlice(
+    graphics: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    radius: number,
+    startAngle: number,
+    endAngle: number,
+    fill: number,
+    alpha: number
+  ): void {
+    graphics.fillStyle(fill, alpha);
+    graphics.fillPoints(this.getArcSlicePoints(x, y, radius, startAngle, endAngle, 16), true, true);
+  }
+
+  private getArcSlicePoints(
+    x: number,
+    y: number,
+    radius: number,
+    startAngle: number,
+    endAngle: number,
+    steps: number
+  ): Phaser.Geom.Point[] {
+    const points = [new Phaser.Geom.Point(x, y)];
+    for (let i = 0; i <= steps; i += 1) {
+      const angle = Phaser.Math.Linear(startAngle, endAngle, i / steps);
+      points.push(new Phaser.Geom.Point(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius));
+    }
+    return points;
+  }
+
+  private getArcEdgePoints(
+    x: number,
+    y: number,
+    radius: number,
+    startAngle: number,
+    endAngle: number,
+    steps: number
+  ): Phaser.Geom.Point[] {
+    const points: Phaser.Geom.Point[] = [];
+    for (let i = 0; i <= steps; i += 1) {
+      const angle = Phaser.Math.Linear(startAngle, endAngle, i / steps);
+      points.push(new Phaser.Geom.Point(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius));
+    }
+    return points;
+  }
+
+  private setTouchAction(playerId: PlayerId, action: ControlAction, pointerId: number, down: boolean): void {
+    if (down) {
+      this.touchPresses[playerId][action].add(pointerId);
+    } else {
+      this.touchPresses[playerId][action].delete(pointerId);
+    }
+  }
+
+  private clearPointerActions(playerId: PlayerId, pointerId: number, actions: ControlAction[] = CONTROL_ACTIONS): void {
+    for (const action of actions) {
+      this.touchPresses[playerId][action].delete(pointerId);
+    }
+  }
+
   private wireCollisions(): void {
     for (const player of this.players) {
       this.physics.add.collider(player.sprite, this.platforms);
@@ -698,10 +1248,11 @@ export class GameScene extends Phaser.Scene {
     this.updatePlayerRoomSpawn(player);
     const speed = player.status.hidden ? HIDDEN_SPEED : PLAYER_SPEED;
     const ladder = this.getPlayerLadder(player);
-    const left = player.controls.left.isDown;
-    const right = player.controls.right.isDown;
-    const up = player.controls.up.isDown;
-    const down = player.controls.down.isDown;
+    const controls = this.readControls(player);
+    const left = controls.left;
+    const right = controls.right;
+    const up = controls.up;
+    const down = controls.down;
     const climbing = this.updatePlayerLadderMovement(player, ladder, up, down, left, right);
 
     if (left === right) {
@@ -715,15 +1266,15 @@ export class GameScene extends Phaser.Scene {
       player.facing = 1;
     }
 
-    if (Phaser.Input.Keyboard.JustDown(player.controls.up) && body.blocked.down && !climbing && !ladder) {
+    if (this.controlJustDown(player.id, "up", controls) && body.blocked.down && !climbing && !ladder) {
       player.sprite.setVelocityY(JUMP_SPEED);
     }
 
-    if (Phaser.Input.Keyboard.JustDown(player.controls.hide)) {
+    if (this.controlJustDown(player.id, "hide", controls)) {
       this.toggleHide(player);
     }
 
-    if (Phaser.Input.Keyboard.JustDown(player.controls.attack)) {
+    if (this.controlJustDown(player.id, "attack", controls)) {
       this.attack(player, time);
     }
 
@@ -736,6 +1287,55 @@ export class GameScene extends Phaser.Scene {
       .setFlipX(player.facing === -1);
 
     this.checkVoidFall(player, time);
+    this.previousControls[player.id] = { ...controls };
+  }
+
+  private readControls(player: PlayerActor): ControlSnapshot {
+    const snapshot = this.createEmptyControlSnapshot();
+    for (const action of CONTROL_ACTIONS) {
+      snapshot[action] = player.controls[action].isDown || this.touchPresses[player.id][action].size > 0;
+    }
+    return snapshot;
+  }
+
+  private controlJustDown(playerId: PlayerId, action: ControlAction, controls: ControlSnapshot): boolean {
+    return controls[action] && !this.previousControls[playerId][action];
+  }
+
+  private createControlSnapshots(): Record<PlayerId, ControlSnapshot> {
+    return {
+      p1: this.createEmptyControlSnapshot(),
+      p2: this.createEmptyControlSnapshot()
+    };
+  }
+
+  private createTouchPresses(): TouchPresses {
+    return {
+      p1: this.createTouchPressSet(),
+      p2: this.createTouchPressSet()
+    };
+  }
+
+  private createTouchPressSet(): Record<ControlAction, Set<number>> {
+    return {
+      left: new Set(),
+      right: new Set(),
+      up: new Set(),
+      down: new Set(),
+      attack: new Set(),
+      hide: new Set()
+    };
+  }
+
+  private createEmptyControlSnapshot(): ControlSnapshot {
+    return {
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+      attack: false,
+      hide: false
+    };
   }
 
   private updatePlayerLadderMovement(
@@ -1153,6 +1753,7 @@ export class GameScene extends Phaser.Scene {
 
   private spawnSpark(x: number, y: number): void {
     const spark = this.add.image(x, y, "spark").setScale(0.35).setDepth(20);
+    this.uiCamera?.ignore(spark);
     this.tweens.add({
       targets: spark,
       scale: 0.85,
@@ -1168,10 +1769,13 @@ export class GameScene extends Phaser.Scene {
       activePlayers.reduce((sum, player) => sum + player.sprite.x, 0) / Math.max(activePlayers.length, 1);
     const centerY =
       activePlayers.reduce((sum, player) => sum + player.sprite.y, 0) / Math.max(activePlayers.length, 1);
+    const camera = this.cameras.main;
+    const halfWidth = camera.width * 0.5;
+    const halfHeight = camera.height * 0.5;
 
-    this.cameras.main.centerOn(
-      Phaser.Math.Clamp(centerX, 480, this.level.rooms.length * this.level.roomWidth - 480),
-      Phaser.Math.Clamp(centerY, 270, this.level.roomHeight - 270)
+    camera.centerOn(
+      Phaser.Math.Clamp(centerX, halfWidth, this.level.rooms.length * this.level.roomWidth - halfWidth),
+      Phaser.Math.Clamp(centerY, halfHeight, this.level.roomHeight - halfHeight)
     );
   }
 

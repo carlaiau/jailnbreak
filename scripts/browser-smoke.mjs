@@ -30,6 +30,7 @@ try {
     "--headless=new",
     "--disable-gpu",
     "--no-first-run",
+    "--virtual-time-budget=3000",
     `--screenshot=${screenshot}`,
     "--window-size=960,540",
     "http://127.0.0.1:5173/?seed=424242"

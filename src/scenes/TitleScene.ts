@@ -111,23 +111,40 @@ export class TitleScene extends Phaser.Scene {
       color: "#f4e8cc",
       lineSpacing: 8
     };
-
-    this.add
-      .text(
-        64,
-        188,
-        [
-          "P1: A/D move  W jump/climb  S down  E hide  R attack",
-          "P2: Arrows move/climb  Shift hide  . attack",
+    const instructionLines = this.shouldShowMobileInstructions()
+      ? [
+          "Mobile landscape: semi-circle pad moves left/right and jump/climb up.",
+          "Buttons: J Jump  H Hide  A Attack",
+          "Hide beside crates, climb ladders, fight guards and monsters only when you have to."
+        ]
+      : [
+          "1P solo: Arrows move/climb  Shift hide  . attack",
+          "2P: P1 A/D/W/S/E/R  P2 Arrows/Shift/.",
           "Hide beside crates, climb ladders, fight guards and monsters only when you have to.",
           "In game: press 1 or 2 to restart in that player mode."
-        ],
-        instructionStyle
-      )
+        ];
+
+    this.add
+      .text(64, 188, instructionLines, instructionStyle)
       .setDepth(10);
   }
 
+  private shouldShowMobileInstructions(): boolean {
+    const touchControlsParam = new URLSearchParams(window.location.search).get("touchControls");
+    if (touchControlsParam === "1") {
+      return true;
+    }
+    if (touchControlsParam === "0") {
+      return false;
+    }
+
+    const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    return coarsePointer || this.sys.game.device.input.touch;
+  }
+
   private createModeButtons(): void {
+    const mobileInstructions = this.shouldShowMobileInstructions();
+
     this.add
       .text(64, 328, "START", {
         fontFamily: "ui-monospace, monospace",
@@ -136,15 +153,38 @@ export class TitleScene extends Phaser.Scene {
       })
       .setDepth(10);
 
-    this.createModeButton(64, 360, 288, 76, 1, "1 PLAYER", "Press 1");
-    this.createModeButton(376, 360, 288, 76, 2, "2 PLAYERS", "Press 2");
+    this.createModeButton(
+      64,
+      360,
+      288,
+      76,
+      1,
+      "1 PLAYER",
+      mobileInstructions ? "Tap to start" : "Press 1"
+    );
+    this.createModeButton(
+      376,
+      360,
+      288,
+      76,
+      2,
+      "2 PLAYERS",
+      mobileInstructions ? "Tap to start" : "Press 2"
+    );
 
     this.add
-      .text(64, 456, "Enter or Space starts the selected mode. Left/Right changes selection.", {
-        fontFamily: "ui-monospace, monospace",
-        fontSize: "14px",
-        color: "#9baaa6"
-      })
+      .text(
+        64,
+        456,
+        mobileInstructions
+          ? "Tap a mode to start."
+          : "Enter or Space starts the selected mode. Left/Right changes selection.",
+        {
+          fontFamily: "ui-monospace, monospace",
+          fontSize: "14px",
+          color: "#9baaa6"
+        }
+      )
       .setDepth(10);
   }
 

@@ -29,6 +29,8 @@ You can also add `?players=1` or `?players=2` to the URL. During play, press `1`
 
 ## Controls
 
+Solo mode uses the P2 keyboard controls for the P1 character.
+
 P1:
 
 - Move: `A` / `D`
@@ -44,6 +46,12 @@ P2:
 - Climb down: `Down`
 - Hide beside crates: `Shift`
 - Attack: `.`, randomly punches or kicks
+
+Mobile landscape:
+
+- Touch controls appear automatically on coarse-pointer landscape devices.
+- Add `?touchControls=1` to the URL to force them on during desktop testing.
+- Each player pad reserves its side of the screen and uses a semi-circle pad for left/right movement and jump/climb up, plus hide and attack.
 
 ## Goal
 
