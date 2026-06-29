@@ -1031,7 +1031,7 @@ export class GameScene extends Phaser.Scene {
     const dx = pointer.x - pad.stickCenter.x;
     const dy = pointer.y - pad.stickCenter.y;
 
-    this.clearPointerActions(pad.playerId, pointer.id, ["left", "right", "up"]);
+    this.clearPointerActions(pad.playerId, pointer.id, ["left", "right", "up", "down"]);
 
     if (dx < -MOBILE_STICK_DEAD_ZONE_X) {
       this.setTouchAction(pad.playerId, "left", pointer.id, true);
@@ -1041,6 +1041,8 @@ export class GameScene extends Phaser.Scene {
 
     if (dy < -MOBILE_STICK_DEAD_ZONE_Y) {
       this.setTouchAction(pad.playerId, "up", pointer.id, true);
+    } else if (dy > MOBILE_STICK_DEAD_ZONE_Y) {
+      this.setTouchAction(pad.playerId, "down", pointer.id, true);
     }
 
     this.refreshMobilePadVisuals(pad);
@@ -1058,7 +1060,7 @@ export class GameScene extends Phaser.Scene {
   private releaseMobilePointer(pad: MobilePad, pointerId: number): void {
     if (pad.stickPointerId === pointerId) {
       pad.stickPointerId = undefined;
-      this.clearPointerActions(pad.playerId, pointerId, ["left", "right", "up"]);
+      this.clearPointerActions(pad.playerId, pointerId, ["left", "right", "up", "down"]);
     }
 
     if (pad.actionPointerIds.delete(pointerId)) {
@@ -1115,11 +1117,7 @@ export class GameScene extends Phaser.Scene {
     const dy = pointer.y - pad.stickCenter.y;
     const radius = pad.stickRadius + 18;
 
-    return (
-      dx * dx + dy * dy <= radius * radius &&
-      pointer.y <= pad.stickCenter.y + 18 &&
-      pointer.y >= pad.stickCenter.y - radius
-    );
+    return dx * dx + dy * dy <= radius * radius;
   }
 
   private refreshMobilePadVisuals(pad: MobilePad): void {
@@ -1138,28 +1136,34 @@ export class GameScene extends Phaser.Scene {
     const activeLeft = this.touchPresses[pad.playerId].left.size > 0;
     const activeRight = this.touchPresses[pad.playerId].right.size > 0;
     const activeUp = this.touchPresses[pad.playerId].up.size > 0;
-    const active = activeLeft || activeRight || activeUp;
+    const activeDown = this.touchPresses[pad.playerId].down.size > 0;
+    const active = activeLeft || activeRight || activeUp || activeDown;
     const { x, y } = pad.stickCenter;
     const radius = pad.stickRadius;
     const graphics = pad.stickSurface;
 
     graphics.clear();
-    this.fillMobileStickSlice(graphics, x, y, radius, Math.PI, Math.PI * 2, 0x081014, 0.64);
+    graphics.fillStyle(0x081014, 0.64);
+    graphics.fillCircle(x, y, radius);
 
     if (activeLeft) {
-      this.fillMobileStickSlice(graphics, x, y, radius, Math.PI, (Math.PI * 4) / 3, pad.stickAccent, 0.46);
+      this.fillMobileStickSlice(graphics, x, y, radius, (Math.PI * 3) / 4, (Math.PI * 5) / 4, pad.stickAccent, 0.46);
     }
     if (activeUp) {
-      this.fillMobileStickSlice(graphics, x, y, radius, (Math.PI * 4) / 3, (Math.PI * 5) / 3, pad.stickAccent, 0.46);
+      this.fillMobileStickSlice(graphics, x, y, radius, (Math.PI * 5) / 4, (Math.PI * 7) / 4, pad.stickAccent, 0.46);
     }
     if (activeRight) {
-      this.fillMobileStickSlice(graphics, x, y, radius, (Math.PI * 5) / 3, Math.PI * 2, pad.stickAccent, 0.46);
+      this.fillMobileStickSlice(graphics, x, y, radius, -Math.PI / 4, Math.PI / 4, pad.stickAccent, 0.46);
+    }
+    if (activeDown) {
+      this.fillMobileStickSlice(graphics, x, y, radius, Math.PI / 4, (Math.PI * 3) / 4, pad.stickAccent, 0.46);
     }
 
     graphics.lineStyle(2, 0xf6f0e2, 0.2);
     graphics.lineBetween(x - radius, y, x + radius, y);
+    graphics.lineBetween(x, y - radius, x, y + radius);
     graphics.lineStyle(active ? 3 : 2, active ? 0xffffff : pad.stickAccent, active ? 0.66 : 0.44);
-    graphics.strokePoints(this.getArcEdgePoints(x, y, radius, Math.PI, Math.PI * 2, 28), false, false);
+    graphics.strokeCircle(x, y, radius);
   }
 
   private fillMobileStickSlice(
@@ -1185,22 +1189,6 @@ export class GameScene extends Phaser.Scene {
     steps: number
   ): Phaser.Geom.Point[] {
     const points = [new Phaser.Geom.Point(x, y)];
-    for (let i = 0; i <= steps; i += 1) {
-      const angle = Phaser.Math.Linear(startAngle, endAngle, i / steps);
-      points.push(new Phaser.Geom.Point(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius));
-    }
-    return points;
-  }
-
-  private getArcEdgePoints(
-    x: number,
-    y: number,
-    radius: number,
-    startAngle: number,
-    endAngle: number,
-    steps: number
-  ): Phaser.Geom.Point[] {
-    const points: Phaser.Geom.Point[] = [];
     for (let i = 0; i <= steps; i += 1) {
       const angle = Phaser.Math.Linear(startAngle, endAngle, i / steps);
       points.push(new Phaser.Geom.Point(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius));
@@ -1362,7 +1350,6 @@ export class GameScene extends Phaser.Scene {
 
     player.climbing = true;
     player.activeLadder = ladder;
-    player.status.hidden = false;
     body.setAllowGravity(false);
     body.checkCollision.up = false;
     body.checkCollision.down = false;

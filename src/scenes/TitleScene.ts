@@ -113,7 +113,7 @@ export class TitleScene extends Phaser.Scene {
     };
     const instructionLines = this.shouldShowMobileInstructions()
       ? [
-          "Mobile landscape: semi-circle pad moves left/right and jump/climb up.",
+          "Mobile landscape: full-circle pad moves left/right and climbs up/down.",
           "Buttons: J Jump  H Hide  A Attack",
           "Hide beside crates, climb ladders, fight guards and monsters only when you have to."
         ]

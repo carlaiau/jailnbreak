@@ -51,7 +51,7 @@ Mobile landscape:
 
 - Touch controls appear automatically on coarse-pointer landscape devices.
 - Add `?touchControls=1` to the URL to force them on during desktop testing.
-- Each player pad reserves its side of the screen and uses a semi-circle pad for left/right movement and jump/climb up, plus hide and attack.
+- Each player pad reserves its side of the screen and uses a full-circle pad for left/right movement and jump/climb up/down, plus hide and attack.
 
 ## Goal
 
